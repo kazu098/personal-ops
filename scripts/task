@@ -30,6 +30,13 @@ detect_type() {
   echo "type:ops"
 }
 
+detect_priority() {
+  local t="${1,,}"
+  [[ "$t" =~ 最優先|緊急|urgent|p0|優先度高|優先高 ]] && echo "priority:p0" && return
+  [[ "$t" =~ 低優先|優先度低|優先低|p2|low ]]         && echo "priority:p2" && return
+  echo "priority:p1"
+}
+
 # ── メイン ────────────────────────────────────────────────────
 TITLE="${1:-}"
 if [[ -z "$TITLE" ]]; then
@@ -39,7 +46,7 @@ fi
 
 AREA=$(detect_area "$TITLE")
 TYPE=$(detect_type "$TITLE")
-PRIORITY="priority:p1"
+PRIORITY=$(detect_priority "$TITLE")
 LABELS="${AREA},${TYPE},${PRIORITY}"
 
 # 追加フラグ（today / this-week / p0 / p2）
