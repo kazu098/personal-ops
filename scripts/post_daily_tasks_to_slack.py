@@ -104,17 +104,22 @@ def reset_done_recurring(today: date) -> None:
     for task in done:
         recurrence = get_prop(task, "Recurrence")
         due_str = get_prop(task, "Due Date")
-        if not due_str:
-            continue
-        due = date.fromisoformat(due_str[:10])
-        # 既に次回日程が今日以降なら触らない（二重リセット防止）
-        if due >= today:
-            continue
-        new_due = next_occurrence(recurrence, due_str)
-        update_page(task["id"], {
-            "Status": {"select": {"name": "To Do"}},
-            "Due Date": {"date": {"start": new_due}},
-        })
+        if recurrence == "Daily":
+            # Daily は Due Date 不要。Status だけ戻す。
+            update_page(task["id"], {
+                "Status": {"select": {"name": "To Do"}},
+            })
+        else:
+            if not due_str:
+                continue
+            due = date.fromisoformat(due_str[:10])
+            if due >= today:
+                continue
+            new_due = next_occurrence(recurrence, due_str)
+            update_page(task["id"], {
+                "Status": {"select": {"name": "To Do"}},
+                "Due Date": {"date": {"start": new_due}},
+            })
     if done:
         print(f"繰り返しリセット: {len(done)} 件")
 
@@ -131,13 +136,11 @@ def promote_recurring_to_today(today: date) -> None:
     for task in candidates:
         recurrence = get_prop(task, "Recurrence")
         due_str = get_prop(task, "Due Date")
-        if not due_str:
-            continue
-        due = date.fromisoformat(due_str[:10])
+        due = date.fromisoformat(due_str[:10]) if due_str else None
         should_promote = (
             recurrence == "Daily"
-            or (recurrence == "Weekly" and due.weekday() == today.weekday())
-            or (recurrence == "Monthly" and due.day == today.day)
+            or (recurrence == "Weekly" and due and due.weekday() == today.weekday())
+            or (recurrence == "Monthly" and due and due.day == today.day)
         )
         if should_promote:
             update_page(task["id"], {

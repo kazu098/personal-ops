@@ -2,8 +2,8 @@ name: Daily Slack Post
 
 on:
   schedule:
-    # 毎朝 5:00 JST (= 20:00 UTC 前日)
-    - cron: "0 20 * * *"
+    # 毎朝 4:00 JST (= 19:00 UTC 前日)
+    - cron: "0 19 * * *"
   workflow_dispatch:
 
 jobs:
