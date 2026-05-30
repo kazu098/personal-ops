@@ -40,7 +40,7 @@ detect_priority() {
 # ── メイン ────────────────────────────────────────────────────
 TITLE="${1:-}"
 if [[ -z "$TITLE" ]]; then
-  read -rp $'\033[36mタイトル: \033[0m' TITLE
+  read -rep $'\033[36mタイトル: \033[0m' TITLE
 fi
 [[ -z "$TITLE" ]] && echo "タイトルは必須です" && exit 1
 
