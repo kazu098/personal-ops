@@ -35,4 +35,10 @@ weekly:
       - type:ops
       - priority:p1
 
-monthly: []
+monthly:
+  - title: "支払い：金子さん（クウ）・太陽光（ネクサス）　ネクサス11000 / クウ167090"
+    day_of_month: 25
+    labels:
+      - area:admin
+      - type:ops
+      - priority:p0
