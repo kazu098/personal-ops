@@ -1,0 +1,24 @@
+name: Create Recurring Tasks
+
+on:
+  schedule:
+    # 毎朝 6:30 JST (= 21:30 UTC 前日)
+    - cron: "30 21 * * *"
+  workflow_dispatch:
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests PyYAML
+
+      - name: Create recurring issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/create_recurring_tasks.py

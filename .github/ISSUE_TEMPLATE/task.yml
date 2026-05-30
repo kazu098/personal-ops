@@ -1,0 +1,67 @@
+name: Task
+description: 新しいタスクを作成する
+title: ""
+labels: []
+body:
+  - type: input
+    id: title
+    attributes:
+      label: タスク名
+      placeholder: 例：Mia：梱包配送
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - area:mia
+        - area:ai-cooking
+        - area:blog
+        - area:study
+        - area:research
+        - area:admin
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      options:
+        - type:ops
+        - type:dev
+        - type:writing
+        - type:research
+        - type:learning
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - priority:p1
+        - priority:p0
+        - priority:p2
+      default: 0
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: flags
+    attributes:
+      label: Flags
+      options:
+        - label: today（今日やる）
+        - label: waiting（誰かの返答待ち）
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: メモ
+      placeholder: 任意
+    validations:
+      required: false

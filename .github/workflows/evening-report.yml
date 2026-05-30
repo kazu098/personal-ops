@@ -1,0 +1,25 @@
+name: Evening Report
+
+on:
+  schedule:
+    # 毎晩 21:00 JST (= 12:00 UTC)
+    - cron: "0 12 * * *"
+  workflow_dispatch:
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests PyYAML
+
+      - name: Post evening report to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/post_evening_report_to_slack.py

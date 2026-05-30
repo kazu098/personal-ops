@@ -1,0 +1,38 @@
+daily:
+  - title: "ニュース確認"
+    labels:
+      - area:blog
+      - type:research
+      - priority:p1
+      - today
+
+  - title: "英語：listening / speaking"
+    labels:
+      - area:study
+      - type:learning
+      - priority:p1
+      - today
+
+  - title: "韓国語単語 / TOPIK"
+    labels:
+      - area:study
+      - type:learning
+      - priority:p1
+      - today
+
+weekly:
+  - title: "AI Cooking：競合アプリを触る"
+    day: "sunday"
+    labels:
+      - area:ai-cooking
+      - type:research
+      - priority:p2
+
+  - title: "GitHubチケット整理"
+    day: "friday"
+    labels:
+      - area:admin
+      - type:ops
+      - priority:p1
+
+monthly: []
