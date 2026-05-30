@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# GitHub Issue をターミナルから素早く登録する
+# 使い方:
+#   task                          # 対話モード
+#   task "タイトル" admin ops p1  # 引数モード（today なし）
+#   task "タイトル" mia dev p0 today
+set -euo pipefail
+
+REPO="kazu098/personal-ops"
+
+# ── 色定義 ──────────────────────────────────────────────────
+BOLD="\033[1m"; CYAN="\033[36m"; GREEN="\033[32m"; RESET="\033[0m"
+
+select_option() {
+  local prompt="$1"; shift
+  local options=("$@")
+  echo -e "${CYAN}${prompt}${RESET}"
+  for i in "${!options[@]}"; do
+    printf "  %d) %s\n" $((i+1)) "${options[$i]}"
+  done
+  while true; do
+    read -rp "番号: " num
+    if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#options[@]} )); then
+      echo "${options[$((num-1))]}"
+      return
+    fi
+    echo "  1〜${#options[@]} で入力してください"
+  done
+}
+
+# ── 引数モード ───────────────────────────────────────────────
+if [[ $# -ge 3 ]]; then
+  TITLE="$1"
+  AREA="area:$2"
+  TYPE="type:$3"
+  PRIORITY="priority:$4"
+  LABELS="${AREA},${TYPE},${PRIORITY}"
+  shift 4 || true
+  for flag in "$@"; do
+    LABELS="${LABELS},${flag}"
+  done
+  url=$(gh issue create --repo "$REPO" --title "$TITLE" --label "$LABELS" 2>&1)
+  echo -e "${GREEN}✅ 登録: ${url}${RESET}"
+  exit 0
+fi
+
+# ── 対話モード ───────────────────────────────────────────────
+echo -e "\n${BOLD}── タスク登録 ──────────────────────────${RESET}"
+read -rp $'\033[36mタイトル: \033[0m' TITLE
+[[ -z "$TITLE" ]] && echo "タイトルは必須です" && exit 1
+
+AREA_VAL=$(select_option "エリア:" mia ai-cooking blog study research admin)
+TYPE_VAL=$(select_option "タイプ:" dev writing research ops learning)
+PRI_VAL=$(select_option "優先度:" p0 p1 p2)
+
+echo -e "${CYAN}フラグ（スペース区切り。不要なら Enter）:${RESET}"
+echo "  例: today   /   this-week   /   today this-week   /   waiting"
+read -rp "フラグ: " FLAGS_INPUT
+
+LABELS="area:${AREA_VAL},type:${TYPE_VAL},priority:${PRI_VAL}"
+for flag in $FLAGS_INPUT; do
+  LABELS="${LABELS},${flag}"
+done
+
+echo -e "${CYAN}メモ（任意、Enter でスキップ）:${RESET}"
+read -rp "メモ: " BODY
+
+echo ""
+url=$(gh issue create --repo "$REPO" --title "$TITLE" --label "$LABELS" --body "$BODY" 2>&1)
+echo -e "${GREEN}✅ 登録: ${url}${RESET}\n"
