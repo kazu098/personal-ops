@@ -1,0 +1,8 @@
+name = "personal-ops-slack-bot"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# Secrets（wrangler secret put <KEY> で設定）:
+#   SLACK_SIGNING_SECRET  - Slack App の Basic Information > Signing Secret
+#   SLACK_BOT_TOKEN       - Slack App の OAuth & Permissions > Bot User OAuth Token (xoxb-...)
+#   GITHUB_PAT            - GitHub Personal Access Token (repo スコープ)
