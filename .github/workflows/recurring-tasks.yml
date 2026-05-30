@@ -2,8 +2,8 @@ name: Create Recurring Tasks
 
 on:
   schedule:
-    # 毎朝 6:30 JST (= 21:30 UTC 前日)
-    - cron: "30 21 * * *"
+    # 毎朝 4:30 JST (= 19:30 UTC 前日)
+    - cron: "30 19 * * *"
   workflow_dispatch:
 
 jobs:
