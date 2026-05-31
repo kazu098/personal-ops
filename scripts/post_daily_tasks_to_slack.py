@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
-"""毎朝 Notion の Today タスクを Slack に投稿する。繰り返しタスクの昇格・リセットも行う。"""
+"""毎朝 Notion の Today / In Progress タスクを Slack Canvas にまとめ、リンクを TODO チャンネルに投稿する。繰り返しタスクの昇格・リセットも行う。"""
 
 import calendar
 import os
+import requests
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
-import requests
-
 NOTION_API_KEY = os.environ["NOTION_API_KEY"]
 NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID"]
-SLACK_WEBHOOK_URL = os.environ["SLACK_WEBHOOK_URL"]
+SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
+SLACK_CHANNEL_ID = os.environ["SLACK_CHANNEL_ID"]
+GITHUB_REPOSITORY = os.environ["GITHUB_REPOSITORY"]
+GH_TOKEN = os.environ["GH_TOKEN"]
 
 NOTION_VERSION = "2022-06-28"
-
 PRIORITY_ORDER = {"High 🔥": 0, "Medium": 1, "Low": 2}
-
 PROJECT_ORDER = ["mia", "mia-kit", "Business", "ブログ", "その他"]
-
 PROJECT_DISPLAY = {
     "mia": "Mia",
     "mia-kit": "Mia Kit",
@@ -35,16 +34,19 @@ def notion_headers() -> dict:
     }
 
 
+def slack_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+
 def query_notion(filter_body: dict) -> list[dict]:
-    url = (
-        f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
-    )
+    url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
     results = []
     payload: dict = {"filter": filter_body, "page_size": 100}
     while True:
-        resp = requests.post(
-            url, headers=notion_headers(), json=payload, timeout=30
-        )
+        resp = requests.post(url, headers=notion_headers(), json=payload, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         results.extend(data["results"])
@@ -56,12 +58,7 @@ def query_notion(filter_body: dict) -> list[dict]:
 
 def update_page(page_id: str, properties: dict) -> None:
     url = f"https://api.notion.com/v1/pages/{page_id}"
-    resp = requests.patch(
-        url,
-        headers=notion_headers(),
-        json={"properties": properties},
-        timeout=30,
-    )
+    resp = requests.patch(url, headers=notion_headers(), json={"properties": properties}, timeout=30)
     resp.raise_for_status()
 
 
@@ -94,7 +91,6 @@ def next_occurrence(recurrence: str, due_str: str) -> str:
 
 
 def reset_done_recurring(today: date) -> None:
-    """Done になった繰り返しタスクを次回日程にリセットする。"""
     done = query_notion({
         "and": [
             {"property": "Recurrence", "select": {"is_not_empty": True}},
@@ -105,10 +101,7 @@ def reset_done_recurring(today: date) -> None:
         recurrence = get_prop(task, "Recurrence")
         due_str = get_prop(task, "Due Date")
         if recurrence == "Daily":
-            # Daily は Due Date 不要。Status だけ戻す。
-            update_page(task["id"], {
-                "Status": {"select": {"name": "To Do"}},
-            })
+            update_page(task["id"], {"Status": {"select": {"name": "To Do"}}})
         else:
             if not due_str:
                 continue
@@ -125,7 +118,6 @@ def reset_done_recurring(today: date) -> None:
 
 
 def promote_recurring_to_today(today: date) -> None:
-    """今日が実行日の繰り返しタスクを Today に昇格する。"""
     candidates = query_notion({
         "and": [
             {"property": "Recurrence", "select": {"is_not_empty": True}},
@@ -143,18 +135,19 @@ def promote_recurring_to_today(today: date) -> None:
             or (recurrence == "Monthly" and due and due.day == today.day)
         )
         if should_promote:
-            update_page(task["id"], {
-                "Status": {"select": {"name": "Today"}},
-            })
+            update_page(task["id"], {"Status": {"select": {"name": "Today"}}})
             promoted += 1
     if promoted:
         print(f"繰り返し昇格: {promoted} 件")
 
 
 def fetch_today_tasks() -> list[dict]:
-    return query_notion(
-        {"property": "Status", "select": {"equals": "Today"}}
-    )
+    return query_notion({
+        "or": [
+            {"property": "Status", "select": {"equals": "Today"}},
+            {"property": "Status", "select": {"equals": "In Progress"}},
+        ]
+    })
 
 
 def task_priority(page: dict) -> int:
@@ -165,38 +158,111 @@ def task_project(page: dict) -> str:
     return get_prop(page, "Project") or "その他"
 
 
-def build_slack_message(tasks: list[dict], date_str: str) -> str:
+def build_canvas_markdown(tasks: list[dict], date_str: str) -> str:
     grouped: dict[str, list] = defaultdict(list)
     for task in tasks:
         grouped[task_project(task)].append(task)
 
-    lines = [f"*今日のタスク（{date_str}）*\n"]
+    lines = [f"# 今日のタスク（{date_str}）", ""]
 
     for key in PROJECT_ORDER:
         items = grouped.get(key, [])
         if not items:
             continue
-        lines.append(f"*{PROJECT_DISPLAY.get(key, key)}*")
+        lines.append(f"## {PROJECT_DISPLAY.get(key, key)}")
         for task in sorted(items, key=task_priority):
-            lines.append(f"・{get_prop(task, 'Name') or '(無題)'}")
+            name = get_prop(task, "Name") or "(無題)"
+            lines.append(f"- [ ] {name}")
         lines.append("")
 
     for key, items in grouped.items():
         if key in PROJECT_ORDER:
             continue
-        lines.append(f"*{key}*")
+        lines.append(f"## {key}")
         for task in sorted(items, key=task_priority):
-            lines.append(f"・{get_prop(task, 'Name') or '(無題)'}")
+            name = get_prop(task, "Name") or "(無題)"
+            lines.append(f"- [ ] {name}")
         lines.append("")
 
     return "\n".join(lines).strip()
 
 
-def post_to_slack(text: str) -> None:
+def create_canvas(title: str, markdown: str) -> str:
+    """スタンドアロン Canvas を新規作成して canvas_id を返す。"""
     resp = requests.post(
-        SLACK_WEBHOOK_URL, json={"text": text}, timeout=30
+        "https://slack.com/api/canvases.create",
+        headers=slack_headers(),
+        json={
+            "title": title,
+            "document_content": {"type": "markdown", "markdown": markdown},
+        },
+        timeout=30,
     )
+    data = resp.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"Canvas creation failed: {data.get('error', data)}")
+    canvas_id = data["canvas_id"]
+    print(f"Canvas 作成: {canvas_id}")
+    return canvas_id
+
+
+def share_canvas(canvas_id: str) -> None:
+    """TODO チャンネルのメンバーが閲覧・チェックできるよう書き込み権限を付与する。"""
+    resp = requests.post(
+        "https://slack.com/api/canvases.access.set",
+        headers=slack_headers(),
+        json={
+            "canvas_id": canvas_id,
+            "access_level": "write",
+            "channel_ids": [SLACK_CHANNEL_ID],
+        },
+        timeout=30,
+    )
+    data = resp.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"canvases.access.set failed: {data.get('error', data)}")
+
+
+def canvas_url(canvas_id: str) -> str:
+    """auth.test からワークスペース URL を取得し Canvas の共有リンクを組み立てる。"""
+    resp = requests.post("https://slack.com/api/auth.test", headers=slack_headers(), timeout=30)
+    data = resp.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"auth.test failed: {data.get('error', data)}")
+    return f"{data['url']}docs/{data['team_id']}/{canvas_id}"
+
+
+def post_canvas_link(url: str, date_str: str, count: int) -> None:
+    """TODO チャンネルに Canvas のリンクを投稿する。"""
+    text = f"📋 今日のタスク（{date_str}）を Canvas にまとめました（{count}件）\n{url}"
+    resp = requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers=slack_headers(),
+        json={"channel": SLACK_CHANNEL_ID, "text": text, "unfurl_links": True},
+        timeout=30,
+    )
+    data = resp.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"chat.postMessage failed: {data.get('error', data)}")
+    print(f"リンク投稿: {url}")
+
+
+def save_canvas_id(canvas_id: str) -> None:
+    """Canvas ID を GitHub リポジトリ変数 DAILY_CANVAS_ID に保存する。"""
+    owner, repo = GITHUB_REPOSITORY.split("/")
+    headers = {
+        "Authorization": f"Bearer {GH_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    base_url = f"https://api.github.com/repos/{owner}/{repo}/actions/variables"
+    payload = {"name": "DAILY_CANVAS_ID", "value": canvas_id}
+
+    resp = requests.patch(f"{base_url}/DAILY_CANVAS_ID", headers=headers, json=payload, timeout=30)
+    if resp.status_code == 404:
+        resp = requests.post(base_url, headers=headers, json=payload, timeout=30)
     resp.raise_for_status()
+    print(f"Canvas ID を保存しました: {canvas_id}")
 
 
 def main() -> None:
@@ -209,10 +275,14 @@ def main() -> None:
 
     tasks = fetch_today_tasks()
     if not tasks:
-        print("Today タスクがありません。投稿をスキップします。")
+        print("対象タスク（Today / In Progress）がありません。Canvas 投稿をスキップします。")
         return
 
-    post_to_slack(build_slack_message(tasks, date_str))
+    markdown = build_canvas_markdown(tasks, date_str)
+    canvas_id = create_canvas(f"今日のタスク（{date_str}）", markdown)
+    share_canvas(canvas_id)
+    save_canvas_id(canvas_id)
+    post_canvas_link(canvas_url(canvas_id), date_str, len(tasks))
     print(f"投稿完了: {len(tasks)} 件")
 
 

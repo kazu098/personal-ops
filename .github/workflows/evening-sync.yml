@@ -1,17 +1,13 @@
-name: Daily Slack Canvas Post
+name: Evening Canvas to Notion Sync
 
 on:
   schedule:
-    # 毎朝 4:00 JST (= 19:00 UTC 前日)
-    - cron: "0 19 * * *"
+    # 毎晩 21:00 JST (= 12:00 UTC)
+    - cron: "0 12 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: read
-  variables: write
-
 jobs:
-  post:
+  sync:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,12 +18,10 @@ jobs:
 
       - run: pip install requests
 
-      - name: Post today's tasks as Slack Canvas
+      - name: Sync Canvas checked items to Notion Done
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python scripts/post_daily_tasks_to_slack.py
+          DAILY_CANVAS_ID: ${{ vars.DAILY_CANVAS_ID }}
+        run: python scripts/sync_canvas_to_notion.py
