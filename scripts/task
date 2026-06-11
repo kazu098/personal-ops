@@ -61,3 +61,6 @@ done
 echo -e "${DIM}  labels: ${LABELS}${RESET}"
 URL=$(gh issue create --repo "$REPO" --title "$TITLE" --label "$LABELS" --body "" 2>&1)
 echo -e "${GREEN}✅ ${URL}${RESET}"
+
+gh project item-add 1 --owner kazu098 --url "$URL" &>/dev/null && \
+  echo -e "${DIM}  → personal-ops board に追加しました${RESET}"

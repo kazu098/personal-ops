@@ -15,7 +15,6 @@ GITHUB_REPOSITORY = os.environ["GITHUB_REPOSITORY"]
 GH_TOKEN = os.environ["GH_TOKEN"]
 
 NOTION_VERSION = "2022-06-28"
-PRIORITY_ORDER = {"High 🔥": 0, "Medium": 1, "Low": 2}
 PROJECT_ORDER = ["mia", "mia-kit", "Business", "ブログ", "その他"]
 PROJECT_DISPLAY = {
     "mia": "Mia",
@@ -150,10 +149,6 @@ def fetch_today_tasks() -> list[dict]:
     })
 
 
-def task_priority(page: dict) -> int:
-    return PRIORITY_ORDER.get(get_prop(page, "Priority"), 99)
-
-
 def task_project(page: dict) -> str:
     return get_prop(page, "Project") or "その他"
 
@@ -170,7 +165,7 @@ def build_canvas_markdown(tasks: list[dict], date_str: str) -> str:
         if not items:
             continue
         lines.append(f"## {PROJECT_DISPLAY.get(key, key)}")
-        for task in sorted(items, key=task_priority):
+        for task in items:
             name = get_prop(task, "Name") or "(無題)"
             lines.append(f"- [ ] {name}")
         lines.append("")
@@ -179,7 +174,7 @@ def build_canvas_markdown(tasks: list[dict], date_str: str) -> str:
         if key in PROJECT_ORDER:
             continue
         lines.append(f"## {key}")
-        for task in sorted(items, key=task_priority):
+        for task in items:
             name = get_prop(task, "Name") or "(無題)"
             lines.append(f"- [ ] {name}")
         lines.append("")
@@ -204,6 +199,77 @@ def create_canvas(title: str, markdown: str) -> str:
     canvas_id = data["canvas_id"]
     print(f"Canvas 作成: {canvas_id}")
     return canvas_id
+
+
+def get_saved_canvas_id() -> str | None:
+    """GitHub リポジトリ変数から保存済み Canvas ID を取得する。"""
+    owner, repo = GITHUB_REPOSITORY.split("/")
+    headers = {
+        "Authorization": f"Bearer {GH_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    resp = requests.get(
+        f"https://api.github.com/repos/{owner}/{repo}/actions/variables/DAILY_CANVAS_ID",
+        headers=headers,
+        timeout=30,
+    )
+    if resp.status_code == 404:
+        return None
+    resp.raise_for_status()
+    return resp.json().get("value") or None
+
+
+def get_canvas_sections(canvas_id: str) -> list[dict]:
+    resp = requests.post(
+        "https://slack.com/api/canvases.sections.lookup",
+        headers=slack_headers(),
+        json={
+            "canvas_id": canvas_id,
+            "criteria": {
+                "section_types": [
+                    "h1", "h2", "h3",
+                    "bullet_list", "ordered_list", "task_list",
+                    "paragraph", "quote", "code_block", "divider",
+                ],
+            },
+        },
+        timeout=30,
+    )
+    data = resp.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"canvases.sections.lookup failed: {data.get('error', data)}")
+    return data.get("sections", [])
+
+
+def update_canvas(canvas_id: str, markdown: str) -> None:
+    """既存 Canvas の内容を全て置き換える。"""
+    sections = get_canvas_sections(canvas_id)
+    if sections:
+        delete_changes = [{"operation": "delete", "section_id": s["id"]} for s in sections]
+        resp = requests.post(
+            "https://slack.com/api/canvases.edit",
+            headers=slack_headers(),
+            json={"canvas_id": canvas_id, "changes": delete_changes},
+            timeout=30,
+        )
+        data = resp.json()
+        if not data.get("ok"):
+            raise RuntimeError(f"canvases.edit (delete) failed: {data.get('error', data)}")
+
+    resp = requests.post(
+        "https://slack.com/api/canvases.edit",
+        headers=slack_headers(),
+        json={
+            "canvas_id": canvas_id,
+            "changes": [{"operation": "insert_at_start", "document_content": {"type": "markdown", "markdown": markdown}}],
+        },
+        timeout=30,
+    )
+    data = resp.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"canvases.edit (insert) failed: {data.get('error', data)}")
+    print(f"Canvas 更新: {canvas_id}")
 
 
 def share_canvas(canvas_id: str) -> None:
@@ -279,9 +345,22 @@ def main() -> None:
         return
 
     markdown = build_canvas_markdown(tasks, date_str)
-    canvas_id = create_canvas(f"今日のタスク（{date_str}）", markdown)
-    share_canvas(canvas_id)
-    save_canvas_id(canvas_id)
+
+    existing_canvas_id = get_saved_canvas_id()
+    if existing_canvas_id:
+        try:
+            update_canvas(existing_canvas_id, markdown)
+            canvas_id = existing_canvas_id
+        except Exception as e:
+            print(f"既存 Canvas の更新失敗（{e}）。新規作成します。")
+            canvas_id = create_canvas("今日のタスク", markdown)
+            share_canvas(canvas_id)
+            save_canvas_id(canvas_id)
+    else:
+        canvas_id = create_canvas("今日のタスク", markdown)
+        share_canvas(canvas_id)
+        save_canvas_id(canvas_id)
+
     post_canvas_link(canvas_url(canvas_id), date_str, len(tasks))
     print(f"投稿完了: {len(tasks)} 件")
 
