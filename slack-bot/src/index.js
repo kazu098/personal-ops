@@ -4,8 +4,6 @@ const REPO_OWNER = "kazu098";
 const REPO_NAME = "personal-ops";
 const GITHUB_API = "https://api.github.com";
 const SLACK_API = "https://slack.com/api";
-const NOTION_API = "https://api.notion.com/v1";
-const NOTION_VERSION = "2022-06-28";
 
 // ── Slack 署名検証 ─────────────────────────────────────────
 async function verifySlackSignature(request, rawBody, signingSecret) {
@@ -121,6 +119,98 @@ function buildTaskModal() {
   };
 }
 
+function truncateOptionText(text, limit = 75) {
+  return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
+}
+
+function buildDailyTaskBlocks(title, tasks, edited = false) {
+  const blocks = [
+    {
+      type: "header",
+      text: { type: "plain_text", text: title, emoji: true },
+    },
+    {
+      type: "context",
+      elements: [{ type: "mrkdwn", text: `${tasks.length}件 / Slack通常投稿${edited ? "（編集済み）" : ""}` }],
+    },
+    {
+      type: "actions",
+      block_id: "task_controls",
+      elements: [
+        {
+          type: "button",
+          action_id: "daily_tasks_edit",
+          text: { type: "plain_text", text: "編集", emoji: true },
+          value: "edit",
+        },
+      ],
+    },
+  ];
+
+  for (let offset = 0; offset < tasks.length; offset += 10) {
+    const chunk = tasks.slice(offset, offset + 10);
+    blocks.push({
+      type: "actions",
+      block_id: `tasks_${offset / 10}`,
+      elements: [
+        {
+          type: "checkboxes",
+          action_id: "task_checked",
+          options: chunk.map((task, index) => ({
+            text: { type: "plain_text", text: truncateOptionText(task), emoji: true },
+            value: `task_${offset + index}`,
+          })),
+        },
+      ],
+    });
+  }
+
+  return blocks;
+}
+
+function extractDailyTaskTitle(message) {
+  const header = message?.blocks?.find(block => block.type === "header");
+  return header?.text?.text || "今日のタスク";
+}
+
+function extractDailyTasks(message) {
+  const tasks = [];
+  for (const block of message?.blocks || []) {
+    for (const element of block.elements || []) {
+      if (element.type !== "checkboxes" || element.action_id !== "task_checked") continue;
+      for (const option of element.options || []) {
+        const text = option.text?.text?.trim();
+        if (text) tasks.push(text);
+      }
+    }
+  }
+  return tasks;
+}
+
+function buildDailyTasksEditModal(channel, ts, title, tasks) {
+  return {
+    type: "modal",
+    callback_id: "edit_daily_tasks",
+    private_metadata: JSON.stringify({ channel, ts, title }),
+    title: { type: "plain_text", text: "To Do編集" },
+    submit: { type: "plain_text", text: "保存" },
+    close: { type: "plain_text", text: "キャンセル" },
+    blocks: [
+      {
+        type: "input",
+        block_id: "tasks",
+        label: { type: "plain_text", text: "1行につき1件" },
+        element: {
+          type: "plain_text_input",
+          action_id: "value",
+          multiline: true,
+          initial_value: tasks.join("\n").slice(0, 3000),
+        },
+      },
+    ],
+  };
+}
+
 // ── GitHub API ─────────────────────────────────────────────
 function githubHeaders(pat) {
   return {
@@ -145,24 +235,6 @@ async function closeIssue(number, pat) {
     method: "PATCH",
     headers: githubHeaders(pat),
     body: JSON.stringify({ state: "closed", state_reason: "completed" }),
-  });
-  return resp.json();
-}
-
-// ── Notion API ─────────────────────────────────────────────
-function notionHeaders(apiKey) {
-  return {
-    "Authorization": `Bearer ${apiKey}`,
-    "Notion-Version": NOTION_VERSION,
-    "Content-Type": "application/json",
-  };
-}
-
-async function markNotionDone(pageId, apiKey) {
-  const resp = await fetch(`${NOTION_API}/pages/${pageId}`, {
-    method: "PATCH",
-    headers: notionHeaders(apiKey),
-    body: JSON.stringify({ properties: { Status: { select: { name: "Done" } } } }),
   });
   return resp.json();
 }
@@ -232,13 +304,17 @@ export default {
 
       if (payload.type === "block_actions") {
         const action = payload.actions?.[0];
-        if (action?.action_id === "task_checked") {
-          if (!env.NOTION_API_KEY) {
-            return new Response("NOTION_API_KEY is not configured", { status: 200 });
-          }
+        if (action?.action_id === "daily_tasks_edit") {
+          const title = extractDailyTaskTitle(payload.message);
+          const tasks = extractDailyTasks(payload.message);
+          await slackPost("views.open", {
+            trigger_id: payload.trigger_id,
+            view: buildDailyTasksEditModal(payload.channel.id, payload.message.ts, title, tasks),
+          }, env.SLACK_BOT_TOKEN);
+          return new Response("", { status: 200 });
+        }
 
-          const selected = action.selected_options || [];
-          await Promise.all(selected.map(option => markNotionDone(option.value, env.NOTION_API_KEY)));
+        if (action?.action_id === "task_checked") {
           return new Response("", { status: 200 });
         }
       }
@@ -261,6 +337,25 @@ export default {
             text: `✅ Issue を登録しました: <${issue.html_url}|#${issue.number} ${title}>`,
           }, env.SLACK_BOT_TOKEN);
         }
+
+        return new Response("", { status: 200 });
+      }
+
+      if (payload.type === "view_submission" && payload.view?.callback_id === "edit_daily_tasks") {
+        const meta = JSON.parse(payload.view.private_metadata || "{}");
+        const rawTasks = payload.view.state.values.tasks.value.value || "";
+        const tasks = rawTasks
+          .split("\n")
+          .map(line => line.replace(/^\s*[-*]?\s*(\[ \]|\[x\])?\s*/i, "").trim())
+          .filter(Boolean);
+        const title = meta.title || "今日のタスク";
+
+        await slackPost("chat.update", {
+          channel: meta.channel,
+          ts: meta.ts,
+          text: `${title}: ${tasks.length}件`,
+          blocks: buildDailyTaskBlocks(title, tasks, true),
+        }, env.SLACK_BOT_TOKEN);
 
         return new Response("", { status: 200 });
       }

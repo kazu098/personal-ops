@@ -204,6 +204,18 @@ def build_task_message_blocks(tasks: list[dict], date_str: str) -> list[dict]:
             "type": "context",
             "elements": [{"type": "mrkdwn", "text": f"{len(tasks)}件 / Slack通常投稿"}],
         },
+        {
+            "type": "actions",
+            "block_id": "task_controls",
+            "elements": [
+                {
+                    "type": "button",
+                    "action_id": "daily_tasks_edit",
+                    "text": {"type": "plain_text", "text": "編集", "emoji": True},
+                    "value": "edit",
+                }
+            ],
+        },
     ]
 
     block_index = 0

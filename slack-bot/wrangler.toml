@@ -6,4 +6,3 @@ compatibility_date = "2024-11-01"
 #   SLACK_SIGNING_SECRET  - Slack App の Basic Information > Signing Secret
 #   SLACK_BOT_TOKEN       - Slack App の OAuth & Permissions > Bot User OAuth Token (xoxb-...)
 #   GITHUB_PAT            - GitHub Personal Access Token (repo スコープ)
-#   NOTION_API_KEY        - チェックボックスから Notion の Status を Done にする場合に必要
