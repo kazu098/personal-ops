@@ -26,4 +26,5 @@ jobs:
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           DAILY_CANVAS_ID: ${{ vars.DAILY_CANVAS_ID }}
+          SLACK_TASK_POST_MODE: message
         run: python scripts/sync_canvas_to_notion.py

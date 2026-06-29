@@ -1,4 +1,4 @@
-name: Daily Slack Canvas Post
+name: Daily Slack Task Post
 
 on:
   schedule:
@@ -23,7 +23,7 @@ jobs:
 
       - run: pip install requests
 
-      - name: Post today's tasks as Slack Canvas
+      - name: Post today's tasks to Slack
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
@@ -31,4 +31,5 @@ jobs:
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           GH_TOKEN: ${{ secrets.GH_PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          SLACK_TASK_POST_MODE: message
         run: python scripts/post_daily_tasks_to_slack.py

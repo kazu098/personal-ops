@@ -4,6 +4,8 @@ const REPO_OWNER = "kazu098";
 const REPO_NAME = "personal-ops";
 const GITHUB_API = "https://api.github.com";
 const SLACK_API = "https://slack.com/api";
+const NOTION_API = "https://api.notion.com/v1";
+const NOTION_VERSION = "2022-06-28";
 
 // ── Slack 署名検証 ─────────────────────────────────────────
 async function verifySlackSignature(request, rawBody, signingSecret) {
@@ -147,6 +149,24 @@ async function closeIssue(number, pat) {
   return resp.json();
 }
 
+// ── Notion API ─────────────────────────────────────────────
+function notionHeaders(apiKey) {
+  return {
+    "Authorization": `Bearer ${apiKey}`,
+    "Notion-Version": NOTION_VERSION,
+    "Content-Type": "application/json",
+  };
+}
+
+async function markNotionDone(pageId, apiKey) {
+  const resp = await fetch(`${NOTION_API}/pages/${pageId}`, {
+    method: "PATCH",
+    headers: notionHeaders(apiKey),
+    body: JSON.stringify({ properties: { Status: { select: { name: "Done" } } } }),
+  });
+  return resp.json();
+}
+
 // ── Slack API ──────────────────────────────────────────────
 async function slackPost(endpoint, body, token) {
   return fetch(`${SLACK_API}/${endpoint}`, {
@@ -209,6 +229,19 @@ export default {
     // モーダル送信（インタラクション）
     if (rawBody.startsWith("payload=")) {
       const payload = JSON.parse(decodeURIComponent(rawBody.slice(8)));
+
+      if (payload.type === "block_actions") {
+        const action = payload.actions?.[0];
+        if (action?.action_id === "task_checked") {
+          if (!env.NOTION_API_KEY) {
+            return new Response("NOTION_API_KEY is not configured", { status: 200 });
+          }
+
+          const selected = action.selected_options || [];
+          await Promise.all(selected.map(option => markNotionDone(option.value, env.NOTION_API_KEY)));
+          return new Response("", { status: 200 });
+        }
+      }
 
       if (payload.type === "view_submission" && payload.view?.callback_id === "create_task") {
         const v = payload.view.state.values;

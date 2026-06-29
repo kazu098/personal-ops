@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""毎朝 Notion の Today / In Progress タスクを Slack Canvas にまとめ、リンクを TODO チャンネルに投稿する。繰り返しタスクの昇格・リセットも行う。"""
+"""毎朝 Notion の Today / In Progress タスクを Slack に投稿する。繰り返しタスクの昇格・リセットも行う。"""
 
 import calendar
 import os
@@ -12,7 +12,8 @@ NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID"]
 SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
 SLACK_CHANNEL_ID = os.environ["SLACK_CHANNEL_ID"]
 GITHUB_REPOSITORY = os.environ["GITHUB_REPOSITORY"]
-GH_TOKEN = os.environ["GH_TOKEN"]
+GH_TOKEN = os.environ.get("GH_TOKEN", "")
+SLACK_TASK_POST_MODE = os.environ.get("SLACK_TASK_POST_MODE", "auto").lower()
 
 NOTION_VERSION = "2022-06-28"
 PROJECT_ORDER = ["mia", "mia-kit", "Business", "ブログ", "その他"]
@@ -182,6 +183,72 @@ def build_canvas_markdown(tasks: list[dict], date_str: str) -> str:
     return "\n".join(lines).strip()
 
 
+def truncate_option_text(text: str, limit: int = 75) -> str:
+    """Slack checkbox option text must be 75 chars or less."""
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
+def build_task_message_blocks(tasks: list[dict], date_str: str) -> list[dict]:
+    grouped: dict[str, list] = defaultdict(list)
+    for task in tasks:
+        grouped[task_project(task)].append(task)
+
+    blocks: list[dict] = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": f"今日のタスク（{date_str}）", "emoji": True},
+        },
+        {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": f"{len(tasks)}件 / Slack通常投稿"}],
+        },
+    ]
+
+    block_index = 0
+    ordered_keys = [key for key in PROJECT_ORDER if grouped.get(key)]
+    ordered_keys.extend(key for key in grouped.keys() if key not in PROJECT_ORDER)
+
+    for key in ordered_keys:
+        items = grouped.get(key, [])
+        if not items:
+            continue
+        blocks.append(
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*{PROJECT_DISPLAY.get(key, key)}*"},
+            }
+        )
+        for offset in range(0, len(items), 10):
+            chunk = items[offset : offset + 10]
+            options = []
+            for task in chunk:
+                name = get_prop(task, "Name") or "(無題)"
+                options.append(
+                    {
+                        "text": {"type": "plain_text", "text": truncate_option_text(name), "emoji": True},
+                        "value": task["id"][:75],
+                    }
+                )
+            blocks.append(
+                {
+                    "type": "actions",
+                    "block_id": f"tasks_{block_index}",
+                    "elements": [
+                        {
+                            "type": "checkboxes",
+                            "action_id": "task_checked",
+                            "options": options,
+                        }
+                    ],
+                }
+            )
+            block_index += 1
+
+    return blocks
+
+
 def create_canvas(title: str, markdown: str) -> str:
     """スタンドアロン Canvas を新規作成して canvas_id を返す。"""
     resp = requests.post(
@@ -203,6 +270,8 @@ def create_canvas(title: str, markdown: str) -> str:
 
 def get_saved_canvas_id() -> str | None:
     """GitHub リポジトリ変数から保存済み Canvas ID を取得する。"""
+    if not GH_TOKEN:
+        return None
     owner, repo = GITHUB_REPOSITORY.split("/")
     headers = {
         "Authorization": f"Bearer {GH_TOKEN}",
@@ -313,8 +382,27 @@ def post_canvas_link(url: str, date_str: str, count: int) -> None:
     print(f"リンク投稿: {url}")
 
 
+def post_task_message(tasks: list[dict], date_str: str) -> None:
+    """Canvas が使えないワークスペース向けに、通常メッセージでチェックボックスを投稿する。"""
+    blocks = build_task_message_blocks(tasks, date_str)
+    text = f"今日のタスク（{date_str}）: {len(tasks)}件"
+    resp = requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers=slack_headers(),
+        json={"channel": SLACK_CHANNEL_ID, "text": text, "blocks": blocks},
+        timeout=30,
+    )
+    data = resp.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"chat.postMessage failed: {data.get('error', data)}")
+    print(f"通常投稿完了: {len(tasks)} 件")
+
+
 def save_canvas_id(canvas_id: str) -> None:
     """Canvas ID を GitHub リポジトリ変数 DAILY_CANVAS_ID に保存する。"""
+    if not GH_TOKEN:
+        print("GH_TOKEN が未設定のため Canvas ID の保存をスキップします。")
+        return
     owner, repo = GITHUB_REPOSITORY.split("/")
     headers = {
         "Authorization": f"Bearer {GH_TOKEN}",
@@ -341,27 +429,33 @@ def main() -> None:
 
     tasks = fetch_today_tasks()
     if not tasks:
-        print("対象タスク（Today / In Progress）がありません。Canvas 投稿をスキップします。")
+        print("対象タスク（Today / In Progress）がありません。Slack 投稿をスキップします。")
         return
 
     markdown = build_canvas_markdown(tasks, date_str)
 
+    if SLACK_TASK_POST_MODE == "message":
+        post_task_message(tasks, date_str)
+        print(f"投稿完了: {len(tasks)} 件")
+        return
+
     existing_canvas_id = get_saved_canvas_id()
-    if existing_canvas_id:
-        try:
+    try:
+        if existing_canvas_id:
             update_canvas(existing_canvas_id, markdown)
             canvas_id = existing_canvas_id
-        except Exception as e:
-            print(f"既存 Canvas の更新失敗（{e}）。新規作成します。")
+        else:
             canvas_id = create_canvas("今日のタスク", markdown)
             share_canvas(canvas_id)
             save_canvas_id(canvas_id)
-    else:
-        canvas_id = create_canvas("今日のタスク", markdown)
-        share_canvas(canvas_id)
-        save_canvas_id(canvas_id)
 
-    post_canvas_link(canvas_url(canvas_id), date_str, len(tasks))
+        post_canvas_link(canvas_url(canvas_id), date_str, len(tasks))
+    except Exception as e:
+        if SLACK_TASK_POST_MODE == "canvas":
+            raise
+        print(f"Canvas 投稿に失敗したため通常投稿に切り替えます: {e}")
+        post_task_message(tasks, date_str)
+
     print(f"投稿完了: {len(tasks)} 件")
 
 

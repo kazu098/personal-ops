@@ -9,6 +9,7 @@ SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
 NOTION_API_KEY = os.environ["NOTION_API_KEY"]
 NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID"]
 DAILY_CANVAS_ID = os.environ.get("DAILY_CANVAS_ID", "")
+SLACK_TASK_POST_MODE = os.environ.get("SLACK_TASK_POST_MODE", "auto").lower()
 
 NOTION_VERSION = "2022-06-28"
 
@@ -103,6 +104,10 @@ def mark_done(page_id: str) -> None:
 
 
 def main() -> None:
+    if SLACK_TASK_POST_MODE == "message":
+        print("SLACK_TASK_POST_MODE=message のため Canvas 同期をスキップします。")
+        return
+
     if not DAILY_CANVAS_ID:
         print("DAILY_CANVAS_ID が未設定のためスキップします。")
         return

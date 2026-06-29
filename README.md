@@ -1,13 +1,13 @@
 # personal-ops
 
 GitHub Issues を正本にした個人タスク管理基盤。
-毎朝 Slack に今日のタスクを投稿し、毎晩完了・未完了を報告する。
+毎朝 Slack に今日のタスクを投稿する。
 
 ## 仕組み
 
 ```
 6:30 JST  recurring-tasks    → tasks/recurring.yml から Issue を自動作成
-7:00 JST  daily-slack        → today ラベル付き open Issue を Slack に投稿
+7:00 JST  daily-slack        → Notion の Today / In Progress タスクを Slack に投稿
            〜 作業 〜
 21:00 JST evening-report     → 完了 / 未完了を Slack に報告
 ```
@@ -50,20 +50,21 @@ gh label create "today"           --color "0052cc"
 gh label create "waiting"         --color "ededed"
 ```
 
-### 3. Slack Incoming Webhook を設定する
+### 3. Slack アプリを設定する
 
 1. [Slack API](https://api.slack.com/apps) でアプリを作成する
-2. **Incoming Webhooks** を有効にする
-3. 投稿先チャンネルを選んで Webhook URL を取得する
+2. Bot Token Scopes に `chat:write` を追加する
+3. アプリを投稿先チャンネルに追加する
 
 ### 4. GitHub Secrets を設定する
 
 ```bash
-gh secret set SLACK_WEBHOOK_URL --body "https://hooks.slack.com/services/..."
+gh secret set SLACK_BOT_TOKEN --body "xoxb-..."
+gh secret set SLACK_CHANNEL_ID --body "C..."
 ```
 
 > `GITHUB_TOKEN` は Actions が自動で提供するため設定不要。
-> 複数リポジトリを横断する場合は `GH_PAT` (Personal Access Token) が追加で必要。
+> Canvas モードで `DAILY_CANVAS_ID` を保存する場合は `GH_PAT` (Personal Access Token) が追加で必要。
 
 ### 5. 動作確認
 
@@ -74,13 +75,15 @@ GitHub の Actions タブから各ワークフローを **Run workflow** で手�
 ```bash
 pip install requests PyYAML
 
-export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
+export SLACK_BOT_TOKEN="xoxb-..."
+export SLACK_CHANNEL_ID="C..."
 export GITHUB_TOKEN="ghp_..."
+export SLACK_TASK_POST_MODE="message"
 
 python scripts/post_daily_tasks_to_slack.py
-python scripts/post_evening_report_to_slack.py
-python scripts/create_recurring_tasks.py
 ```
+
+Slack のフリープランでは Canvas が使えないため、Actions は `SLACK_TASK_POST_MODE=message` で通常のチャンネル投稿を使う。Pro 以上で Canvas を使う場合は `auto` または `canvas` に戻すと、保存済み `DAILY_CANVAS_ID` があれば既存 Canvas を上書きする。
 
 ## 対象リポジトリの追加
 
